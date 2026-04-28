@@ -1,0 +1,18 @@
+┌─────────────────────────────────────────────────┐
+│  Magic (2B) │ Version (1B) │ Message Type (1B)  │
+├─────────────────────────────────────────────────┤
+│  Message ID (16B)                               │
+│  Request ID (16B)  │  Correlation ID (16B)      │
+├─────────────────────────────────────────────────┤
+│  Sender (8B)  │  Timestamp (8B)                 │
+│  Deadline (8B) │  Flags (2B)                    │
+├─────────────────────────────────────────────────┤
+│  Service (4B) │ Operation (4B) │ Version (2B)   │
+│  Auth Len (2B) │ Payload Len (4B)               │
+│  Checksum (4B)                                  │
+├─────────────────────────────────────────────────┤
+│  Auth Token (variable)                          │
+│  Payload (variable)                             │
+└─────────────────────────────────────────────────┘
+
+Fixed header = 82 bytes. Then auth bytes, then payload.
