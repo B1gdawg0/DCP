@@ -1,6 +1,5 @@
 package proto
 
-// Ref: Spec-1.0
 type MessageType uint8
 
 const (
