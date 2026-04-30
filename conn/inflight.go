@@ -11,6 +11,7 @@ import (
 type InFlight struct {
     RequestID  [16]byte
     State      state.State
+	AcceptedCh chan struct{}
     ResultCh   chan *proto.Frame 
     SentAt     time.Time
     Deadline   time.Time
@@ -18,29 +19,34 @@ type InFlight struct {
     mu         sync.Mutex
 
     once sync.Once
+	acceptOnce sync.Once
 }
 
 func NewInFlight(requestID [16]byte, deadline time.Time) *InFlight {
 	return &InFlight{
 		RequestID: requestID,
 		Deadline:  deadline,
+		AcceptedCh: make(chan struct{}),
 		ResultCh:  make(chan *proto.Frame, 1),
 	}
 }
 
 func (i *InFlight) deliver(frame *proto.Frame) {
-	switch frame.Header.Type {
-
-	case proto.TypeAccepted:
-		return
-
-	default:
-		i.once.Do(func() {
-			select {
-			case i.ResultCh <- frame:
-			default:
-			}
-			close(i.ResultCh)
-		})
-	}
+    switch frame.Header.Type {
+    case proto.TypeAccepted:
+        i.acceptOnce.Do(func() {
+            i.mu.Lock()
+            i.State = state.StateAccepted
+            i.mu.Unlock()
+            close(i.AcceptedCh) // ← unblocks caller immediately
+        })
+    default:
+        i.once.Do(func() {
+            select {
+            case i.ResultCh <- frame:
+            default:
+            }
+            close(i.ResultCh)
+        })
+    }
 }

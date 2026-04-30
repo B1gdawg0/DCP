@@ -21,8 +21,6 @@ type Conn struct {
 
 	closeOnce sync.Once
 	closeCh   chan struct{}
-
-	mu sync.Mutex
 }
 
 type FrameHandler func(frame *p.Frame) (*p.Frame, error)
@@ -42,7 +40,7 @@ func NewConn(raw net.Conn, handler FrameHandler) *Conn {
 func (c *Conn) Start(ctx context.Context) {
 	go c.readLoop(ctx)
 	go c.writeLoop(ctx)
-	go c.deadlineLoop(ctx)
+	// go c.deadlineLoop(ctx)
 }
 
 func (c *Conn) Send(frame *p.Frame) error {
@@ -58,6 +56,7 @@ func (c *Conn) Close() {
 	c.closeOnce.Do(func() {
 		close(c.closeCh)
 		c.raw.Close()
+		c.dedup.Stop()
 	})
 }
 
@@ -119,11 +118,11 @@ func (c *Conn) route(frame *p.Frame) {
 		requestID := frame.Header.RequestID
 
 		key := string(requestID[:])
-		if c.dedup.IsDuplicate(key) {
+		if c.dedup.CheckAndMark(key) {
 			c.sendACK(frame)
 			return
 		}
-		c.dedup.Mark(key)
+
 		c.deliverToInFlight(frame)
 		c.sendACK(frame)
 
@@ -138,15 +137,18 @@ func (c *Conn) route(frame *p.Frame) {
 		}
 
 	case p.TypeACK:
-		c.deliverToInFlight(frame)
+		key := "ack:" + string(frame.Header.RequestID[:])
+		if val, ok := c.inflight.Load(key); ok {
+			ch := val.(chan struct{})
+			select {
+			case ch <- struct{}{}:
+			default:
+			}
+		}
 	}
 }
 
 func (c *Conn) handleRequest(req *p.Frame) {
-	if time.Now().After(time.Unix(0, req.Header.Deadline)) {
-		return
-	}
-
 	accepted := &p.Frame{
 		Header: p.Header{
 			Magic:     [2]byte{0xDC, 0x50},
@@ -166,6 +168,11 @@ func (c *Conn) handleRequest(req *p.Frame) {
 	result, err := c.handler(req)
 	if err != nil {
 		c.Send(failedFrame(req, err))
+		return
+	}
+
+	if time.Now().After(time.Unix(0, req.Header.Deadline)) {
+		c.Send(expiredFrame(req.Header.RequestID))
 		return
 	}
 
@@ -232,9 +239,18 @@ func failedFrame(req *p.Frame, err error) *p.Frame {
 
 func (c *Conn) RegisterInFlight(entry *InFlight) {
 	key := string(entry.RequestID[:])
+
 	c.inflight.Store(key, entry)
+
+	timeout := time.Until(entry.Deadline)
+
+	time.AfterFunc(timeout, func() {
+		if _, loaded := c.inflight.LoadAndDelete(key); loaded {
+			entry.deliver(expiredFrame(entry.RequestID))
+		}
+	})
 }
 
-func (c *Conn) removeInFlight(requestID [16]byte) {
-	c.inflight.Delete(string(requestID[:]))
-}
+// func (c *Conn) removeInFlight(requestID [16]byte) {
+// 	c.inflight.Delete(string(requestID[:]))
+// }

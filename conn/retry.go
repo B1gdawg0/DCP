@@ -13,38 +13,26 @@ const (
 )
 
 func (c *Conn) sendWithRetry(frame *p.Frame, req *p.Frame) {
-	requestID := frame.Header.RequestID
+    ackCh := make(chan struct{}, 1)
+    key := "ack:" + string(frame.Header.RequestID[:])
+    c.inflight.Store(key, ackCh) // separate namespace
 
-	entry := NewInFlight(requestID, time.Now().Add(10*time.Second)) // ACK wait window
-	c.RegisterInFlight(entry)
+    go func() {
+        defer c.inflight.Delete(key)
+        backoff := initialBackoff
 
-	go func() {
-		defer c.removeInFlight(requestID)
-
-		backoff := initialBackoff
-
-		for attempt := 0; attempt < maxRetries; attempt++ {
-			_ = c.Send(frame)
-
-			select {
-			case res, ok := <-entry.ResultCh:
-				if !ok {
-					return
-				}
-
-				if res.Header.Type == p.TypeACK {
-					return
-				}
-
-			case <-time.After(backoff):
-			}
-
-			backoff *= 2
-			if backoff > maxBackoff {
-				backoff = maxBackoff
-			}
-		}
-
-		_ = c.Send(failedFrame(req, ErrRetryExceeded))
-	}()
+        for attempt := 0; attempt < maxRetries; attempt++ {
+            c.Send(frame)
+            select {
+            case <-ackCh:
+                return // ACK received, done
+            case <-time.After(backoff):
+            }
+            backoff *= 2
+            if backoff > maxBackoff {
+                backoff = maxBackoff
+            }
+        }
+        c.Send(failedFrame(req, ErrRetryExceeded))
+    }()
 }

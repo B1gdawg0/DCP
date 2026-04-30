@@ -9,48 +9,46 @@ type DedupStore struct {
     seen map[string]time.Time
     mu   sync.Mutex
     ttl  time.Duration
+	stopCh chan struct{}
 }
 
 func NewDedupStore(ttl time.Duration) *DedupStore {
 	d := &DedupStore{
 		seen: make(map[string]time.Time),
 		ttl:  ttl,
+		stopCh: make(chan struct{}),
 	}
 
 	go func() {
 		ticker := time.NewTicker(ttl)
 		defer ticker.Stop()
 
-		for range ticker.C {
-			d.Reap()
+		for {
+			select {
+			case <-ticker.C:
+				d.Reap()
+			case <-d.stopCh:
+				return
+			}
 		}
 	}()
 
 	return d
 }
 
-func (d *DedupStore) IsDuplicate(requestID string) bool {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	t, ok := d.seen[requestID]
-	if !ok {
-		return false
-	}
-
-	if time.Since(t) > d.ttl {
-		delete(d.seen, requestID)
-		return false
-	}
-
-	return true
+func (d *DedupStore) Stop() {
+	close(d.stopCh)
 }
 
-func (d *DedupStore) Mark(requestID string) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	d.seen[requestID] = time.Now()
+func (d *DedupStore) CheckAndMark(requestID string) (isDuplicate bool) {
+    d.mu.Lock()
+    defer d.mu.Unlock()
+    t, ok := d.seen[requestID]
+    if ok && time.Since(t) <= d.ttl {
+        return true
+    }
+    d.seen[requestID] = time.Now()
+    return false
 }
 
 func (d *DedupStore) Reap() {
