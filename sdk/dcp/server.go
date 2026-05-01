@@ -3,16 +3,18 @@ package dcp
 import (
 	"context"
 	"fmt"
+	"net"
 	"time"
 
 	"github.com/B1gdawg0/DCP/conn"
 	"github.com/B1gdawg0/DCP/proto"
+	"github.com/hashicorp/yamux"
 )
 
 type Server struct {
 	addr     string
 	registry *registry
-	listener *conn.Listener
+	listener net.Listener
 }
 
 func NewServer(addr string) *Server {
@@ -27,7 +29,7 @@ func (s *Server) Handle(service, operation string, version uint8, fn HandlerFunc
 }
 
 func (s *Server) ListenAndServe(ctx context.Context) error {
-	l, err := conn.Listen(s.addr, s.dispatch)
+	l, err := net.Listen("tcp", s.addr)
 	if err != nil {
 		return err
 	}
@@ -36,11 +38,9 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 
 	fmt.Println("dcp: server listening on", s.addr)
 
-	connCh := make(chan *conn.Conn)
-
 	go func() {
 		for {
-			c, err := l.AcceptConn()
+			rawTCP, err := l.Accept()
 			if err != nil {
 				select {
 				case <-ctx.Done():
@@ -50,17 +50,29 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 					continue
 				}
 			}
-			connCh <- c
+
+			session, err := yamux.Server(rawTCP, nil)
+			if err != nil {
+				rawTCP.Close()
+				continue
+			}
+			go s.handleYamuxSession(ctx, session)
 		}
 	}()
 
+	<-ctx.Done()
+	return nil
+}
+
+func (s *Server) handleYamuxSession(ctx context.Context, session *yamux.Session) {
 	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case c := <-connCh:
-			c.Start(ctx)
+		stream, err := session.Accept()
+		if err != nil {
+			return
 		}
+
+		c := conn.NewConn(stream, s.dispatch)
+		c.Start(ctx)
 	}
 }
 
