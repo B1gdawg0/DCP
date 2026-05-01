@@ -75,7 +75,6 @@ func (c *Conn) readLoop(ctx context.Context) {
 
 		frame, err := p.DecodeFrame(c.reader)
 		if err != nil {
-			fmt.Println("decode error:", err)
 			return
 		}
 		c.route(frame)
@@ -92,7 +91,6 @@ func (c *Conn) writeLoop(ctx context.Context) {
 			return
 		case frame := <-c.sendCh:
 			if err := c.writeDirect(frame); err != nil {
-				fmt.Println("write error:", err)
 				return
 			}
 		}
@@ -121,7 +119,7 @@ func (c *Conn) writeDirect(frame *p.Frame) error {
 }
 
 func (c *Conn) route(frame *p.Frame) {
-	fmt.Println("received:", frame.Header.Type)
+	fmt.Println("debug received:", frame.Header.Type)
 
 	switch frame.Header.Type {
 

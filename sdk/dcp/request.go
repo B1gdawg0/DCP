@@ -6,7 +6,6 @@ import (
 	"github.com/B1gdawg0/DCP/proto"
 )
 
-// Request is what a server-side handler receives
 type Request struct {
 	Service   string
 	Operation string
@@ -17,10 +16,9 @@ type Request struct {
 	raw       *proto.Frame
 }
 
-// Response is what a server-side handler returns
 type Response struct {
 	Payload []byte
-	Flags   uint16 // e.g. proto.FlagNoACK for large payloads
+	Flags   uint16
 }
 
 func requestFromFrame(f *proto.Frame) *Request {

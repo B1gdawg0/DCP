@@ -5,7 +5,6 @@ import (
 	"sync"
 )
 
-// route key is service+operation+version combined
 type routeKey struct {
 	ServiceID uint32
 	OpID      uint32
@@ -17,7 +16,7 @@ type HandlerFunc func(req *Request) (*Response, error)
 type registry struct {
 	mu       sync.RWMutex
 	handlers map[routeKey]HandlerFunc
-	names    map[routeKey][3]string // for debugging: service, op, version string
+	names    map[routeKey][3]string
 }
 
 func newRegistry() *registry {
@@ -47,14 +46,11 @@ func (r *registry) resolve(serviceID, opID uint32, version uint8) (HandlerFunc, 
 	return fn, ok
 }
 
-// hashName converts a string name to a stable uint32 ID using FNV
 func hashName(name string) uint32 {
 	h := fnv.New32a()
 	h.Write([]byte(name))
 	return h.Sum32()
 }
 
-// ServiceID returns the numeric ID for a given service name.
-// Use this on the client side to build requests.
 func ServiceID(name string) uint32 { return hashName(name) }
 func OperationID(name string) uint32 { return hashName(name) }

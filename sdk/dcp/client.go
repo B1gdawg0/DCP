@@ -16,7 +16,7 @@ type Client struct {
 }
 
 func NewClient(ctx context.Context, addr string) (*Client, error) {
-	c, err := conn.Dial(ctx, addr, nil) // client never handles incoming requests
+	c, err := conn.Dial(ctx, addr, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -27,7 +27,6 @@ func NewClient(ctx context.Context, addr string) (*Client, error) {
 
 func (cl *Client) Close() { cl.c.Close() }
 
-// Send is the async path — returns a Future immediately after ACCEPTED.
 func (cl *Client) Send(ctx context.Context, req *ClientRequest) (*Future, error) {
 	frame, entry := cl.buildFrame(req)
 	cl.c.RegisterInFlight(entry)
@@ -43,7 +42,7 @@ func (cl *Client) Send(ctx context.Context, req *ClientRequest) (*Future, error)
 	}, nil
 }
 
-// Call is the sync path — blocks until COMPLETED arrives, like normal RPC.
+
 func (cl *Client) Call(ctx context.Context, req *ClientRequest) (*Result, error) {
 	future, err := cl.Send(ctx, req)
 	if err != nil {
@@ -52,14 +51,13 @@ func (cl *Client) Call(ctx context.Context, req *ClientRequest) (*Result, error)
 	return future.Wait(ctx)
 }
 
-// ClientRequest is what the caller builds to make a DCP request
 type ClientRequest struct {
 	Service   string
 	Operation string
 	Version   uint8
 	Payload   []byte
 	Auth      []byte
-	Deadline  time.Duration // how long the server has, e.g. 10*time.Second
+	Deadline  time.Duration
 }
 
 func (cl *Client) buildFrame(req *ClientRequest) (*proto.Frame, *conn.InFlight) {
