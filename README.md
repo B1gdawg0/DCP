@@ -345,7 +345,7 @@ server.Handle("payment", "authorize", 2, newHandler)
 
 ## Wire Format
 
-DCP uses a fixed 82-byte binary header followed by variable-length auth and payload. No path, no method string, no ASCII headers.
+DCP uses a fixed 96-byte binary header followed by variable-length auth and payload. No path, no method string, no ASCII headers.
 
 ```
 ┌─────────────────────────────────────────────────┐

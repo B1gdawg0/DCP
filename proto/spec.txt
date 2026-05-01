@@ -15,4 +15,4 @@
 │  Payload (variable)                             │
 └─────────────────────────────────────────────────┘
 
-Fixed header = 82 bytes. Then auth bytes, then payload.
+Fixed header = 96 bytes. Then auth bytes, then payload.

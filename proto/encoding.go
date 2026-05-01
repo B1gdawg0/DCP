@@ -9,7 +9,7 @@ import (
 
 var headerBufPool = sync.Pool{
 	New: func() any {
-		b := make([]byte, 0, 82)
+		b := make([]byte, 0, 96)
 		return &b
 	},
 }
