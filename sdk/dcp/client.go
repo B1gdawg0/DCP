@@ -2,76 +2,37 @@ package dcp
 
 import (
 	"context"
-	"net"
 	"time"
 
 	"github.com/B1gdawg0/DCP/conn"
 	"github.com/B1gdawg0/DCP/proto"
 	"github.com/google/uuid"
-	"github.com/hashicorp/yamux"
 )
 
 type Client struct {
-	session     *yamux.Session
-	controlConn *conn.Conn
-	dataConn    *conn.Conn
-	senderID    [8]byte
-	version     uint8
+	c        *conn.Conn
+	senderID [8]byte
+	version  uint8
 }
 
 func NewClient(ctx context.Context, addr string) (*Client, error) {
-	var d net.Dialer
-	rawTCP, err := d.DialContext(ctx, "tcp", addr)
+	c, err := conn.Dial(ctx, addr, nil) // client never handles incoming requests
 	if err != nil {
 		return nil, err
 	}
-
-	session, err := yamux.Client(rawTCP, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	stream1, err := session.Open()
-	if err != nil {
-		return nil, err
-	}
-	controlConn := conn.NewConn(stream1, nil)
-
-	stream2, err := session.Open()
-	if err != nil {
-		return nil, err
-	}
-	dataConn := conn.NewConn(stream2, nil)
-
-	cl := &Client{
-		session:     session,
-		controlConn: controlConn,
-		dataConn:    dataConn,
-		version:     1,
-	}
-
-	cl.controlConn.Start(ctx)
-	cl.dataConn.Start(ctx)
-
+	cl := &Client{c: c, version: 1}
+	c.Start(ctx)
 	return cl, nil
 }
 
-func (cl *Client) Close() {
-	cl.session.Close()
-}
+func (cl *Client) Close() { cl.c.Close() }
 
+// Send is the async path — returns a Future immediately after ACCEPTED.
 func (cl *Client) Send(ctx context.Context, req *ClientRequest) (*Future, error) {
-	var activeConn *conn.Conn
-	if len(req.Payload) > 1024*1024 {
-		activeConn = cl.dataConn
-	} else {
-		activeConn = cl.controlConn
-	}
-
 	frame, entry := cl.buildFrame(req)
-	activeConn.RegisterInFlight(entry)
+	cl.c.RegisterInFlight(entry)
 
-	if err := activeConn.Send(frame); err != nil {
+	if err := cl.c.Send(frame); err != nil {
 		return nil, err
 	}
 
@@ -82,6 +43,7 @@ func (cl *Client) Send(ctx context.Context, req *ClientRequest) (*Future, error)
 	}, nil
 }
 
+// Call is the sync path — blocks until COMPLETED arrives, like normal RPC.
 func (cl *Client) Call(ctx context.Context, req *ClientRequest) (*Result, error) {
 	future, err := cl.Send(ctx, req)
 	if err != nil {
@@ -90,13 +52,14 @@ func (cl *Client) Call(ctx context.Context, req *ClientRequest) (*Result, error)
 	return future.Wait(ctx)
 }
 
+// ClientRequest is what the caller builds to make a DCP request
 type ClientRequest struct {
 	Service   string
 	Operation string
 	Version   uint8
 	Payload   []byte
 	Auth      []byte
-	Deadline  time.Duration
+	Deadline  time.Duration // how long the server has, e.g. 10*time.Second
 }
 
 func (cl *Client) buildFrame(req *ClientRequest) (*proto.Frame, *conn.InFlight) {
