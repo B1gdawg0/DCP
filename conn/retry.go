@@ -15,7 +15,7 @@ const (
 func (c *Conn) sendWithRetry(frame *p.Frame, req *p.Frame) {
     ackCh := make(chan struct{}, 1)
     key := "ack:" + string(frame.Header.RequestID[:])
-    c.inflight.Store(key, ackCh) // separate namespace
+    c.inflight.Store(key, ackCh)
 
     go func() {
         defer c.inflight.Delete(key)
@@ -25,7 +25,7 @@ func (c *Conn) sendWithRetry(frame *p.Frame, req *p.Frame) {
             c.Send(frame)
             select {
             case <-ackCh:
-                return // ACK received, done
+                return
             case <-time.After(backoff):
             }
             backoff *= 2

@@ -78,9 +78,6 @@ func DecodeFrame(r io.Reader) (*Frame, error) {
 	if h.PayloadLen > maxPayload {
 		return nil, errors.New("payload too large")
 	}
-	// if h.Flags&FlagCompressed != 0 {
-	// 	payload = decompress(payload)
-	// }
 
 	//body
 	auth := make([]byte, h.AuthLen)

@@ -97,7 +97,6 @@ func (c *Conn) writeLoop(ctx context.Context) {
 	}
 }
 
-// writeDirect writes header then auth then payload separately — no full-frame allocation
 func (c *Conn) writeDirect(frame *p.Frame) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
@@ -129,7 +128,6 @@ func (c *Conn) route(frame *p.Frame) {
 	case p.TypeCompleted, p.TypeFailed, p.TypeCancelled, p.TypeExpired:
 		key := string(frame.Header.RequestID[:])
 		if c.dedup.CheckAndMark(key) {
-			// Fix 3: only ACK if sender wants it
 			if frame.Header.Flags&p.FlagNoACK == 0 {
 				c.sendACK(frame)
 			}

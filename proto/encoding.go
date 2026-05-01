@@ -1,7 +1,6 @@
 package proto
 
 import (
-	"encoding/binary"
 	"hash/crc32"
 	"io"
 	"sync"
@@ -97,8 +96,4 @@ func EncodeFrame(f *Frame) ([]byte, error) {
 	result = append(result, f.Auth...)
 	result = append(result, f.Payload...)
 	return result, nil
-}
-
-func encodeBinary(w io.Writer, v any) error {
-	return binary.Write(w, binary.BigEndian, v)
 }

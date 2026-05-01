@@ -42,7 +42,6 @@ func (i *InFlight) deliver(frame *proto.Frame) {
 		})
 	default:
 		i.once.Do(func() {
-			// Fix 4: cancel the deadline timer — request is done
 			if i.timer != nil {
 				i.timer.Stop()
 			}
