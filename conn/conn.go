@@ -244,7 +244,6 @@ func failedFrame(req *p.Frame, err error) *p.Frame {
 	}
 }
 
-// RegisterInFlight — Fix 4: store timer so it can be cancelled on completion
 func (c *Conn) RegisterInFlight(entry *InFlight) {
 	key := string(entry.RequestID[:])
 	c.inflight.Store(key, entry)
