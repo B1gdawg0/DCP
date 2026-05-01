@@ -7,7 +7,7 @@
 │  Sender (8B)  │  Timestamp (8B)                 │
 │  Deadline (8B) │  Flags (2B)                    │
 ├─────────────────────────────────────────────────┤
-│  Service (4B) │ Operation (4B) │ Version (2B)   │
+│  Service (4B) │ Operation (4B)                  │
 │  Auth Len (2B) │ Payload Len (4B)               │
 │  Checksum (4B)                                  │
 ├─────────────────────────────────────────────────┤

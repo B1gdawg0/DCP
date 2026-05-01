@@ -13,6 +13,7 @@ import (
 
 type Conn struct {
 	raw      net.Conn
+	writer   *bufio.Writer
 	reader   *bufio.Reader
 	sendCh   chan *p.Frame
 	inflight sync.Map
@@ -21,6 +22,7 @@ type Conn struct {
 
 	closeOnce sync.Once
 	closeCh   chan struct{}
+	writeMu   sync.Mutex
 }
 
 type FrameHandler func(frame *p.Frame) (*p.Frame, error)
@@ -29,6 +31,7 @@ func NewConn(raw net.Conn, handler FrameHandler) *Conn {
 	c := &Conn{
 		raw:     raw,
 		reader:  bufio.NewReader(raw),
+		writer:  bufio.NewWriterSize(raw, 64*1024),
 		sendCh:  make(chan *p.Frame, 256),
 		dedup:   NewDedupStore(2 * time.Minute),
 		handler: handler,
@@ -40,7 +43,6 @@ func NewConn(raw net.Conn, handler FrameHandler) *Conn {
 func (c *Conn) Start(ctx context.Context) {
 	go c.readLoop(ctx)
 	go c.writeLoop(ctx)
-	// go c.deadlineLoop(ctx)
 }
 
 func (c *Conn) Send(frame *p.Frame) error {
@@ -62,7 +64,6 @@ func (c *Conn) Close() {
 
 func (c *Conn) readLoop(ctx context.Context) {
 	defer c.Close()
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -74,18 +75,15 @@ func (c *Conn) readLoop(ctx context.Context) {
 
 		frame, err := p.DecodeFrame(c.reader)
 		if err != nil {
-			// connection broken or closed — stop
 			fmt.Println("decode error:", err)
 			return
 		}
-
 		c.route(frame)
 	}
 }
 
 func (c *Conn) writeLoop(ctx context.Context) {
 	defer c.Close()
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -93,17 +91,33 @@ func (c *Conn) writeLoop(ctx context.Context) {
 		case <-c.closeCh:
 			return
 		case frame := <-c.sendCh:
-			data, err := p.EncodeFrame(frame)
-			if err != nil {
-				fmt.Println("encode error:", err)
-				continue // bad frame, skip it
-			}
-			if _, err := c.raw.Write(data); err != nil {
+			if err := c.writeDirect(frame); err != nil {
 				fmt.Println("write error:", err)
-				return // connection broken
+				return
 			}
 		}
 	}
+}
+
+// writeDirect writes header then auth then payload separately — no full-frame allocation
+func (c *Conn) writeDirect(frame *p.Frame) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+
+	if err := p.EncodeHeader(c.writer, frame); err != nil {
+		return err
+	}
+	if len(frame.Auth) > 0 {
+		if _, err := c.writer.Write(frame.Auth); err != nil {
+			return err
+		}
+	}
+	if len(frame.Payload) > 0 {
+		if _, err := c.writer.Write(frame.Payload); err != nil {
+			return err
+		}
+	}
+	return c.writer.Flush()
 }
 
 func (c *Conn) route(frame *p.Frame) {
@@ -115,23 +129,20 @@ func (c *Conn) route(frame *p.Frame) {
 		c.deliverToInFlight(frame)
 
 	case p.TypeCompleted, p.TypeFailed, p.TypeCancelled, p.TypeExpired:
-		requestID := frame.Header.RequestID
-
-		key := string(requestID[:])
+		key := string(frame.Header.RequestID[:])
 		if c.dedup.CheckAndMark(key) {
-			c.sendACK(frame)
+			// Fix 3: only ACK if sender wants it
+			if frame.Header.Flags&p.FlagNoACK == 0 {
+				c.sendACK(frame)
+			}
 			return
 		}
-
 		c.deliverToInFlight(frame)
-		c.sendACK(frame)
-
-	case p.TypeRequest:
-		if c.handler != nil {
-			go c.handleRequest(frame)
+		if frame.Header.Flags&p.FlagNoACK == 0 {
+			c.sendACK(frame)
 		}
 
-	case p.TypeQuery:
+	case p.TypeRequest, p.TypeQuery:
 		if c.handler != nil {
 			go c.handleRequest(frame)
 		}
@@ -183,7 +194,7 @@ func (c *Conn) deliverToInFlight(frame *p.Frame) {
 	key := string(frame.Header.RequestID[:])
 	val, ok := c.inflight.Load(key)
 	if !ok {
-		return 
+		return
 	}
 	entry := val.(*InFlight)
 	entry.deliver(frame)
@@ -237,20 +248,14 @@ func failedFrame(req *p.Frame, err error) *p.Frame {
 	}
 }
 
+// RegisterInFlight — Fix 4: store timer so it can be cancelled on completion
 func (c *Conn) RegisterInFlight(entry *InFlight) {
 	key := string(entry.RequestID[:])
-
 	c.inflight.Store(key, entry)
 
-	timeout := time.Until(entry.Deadline)
-
-	time.AfterFunc(timeout, func() {
+	entry.timer = time.AfterFunc(time.Until(entry.Deadline), func() {
 		if _, loaded := c.inflight.LoadAndDelete(key); loaded {
 			entry.deliver(expiredFrame(entry.RequestID))
 		}
 	})
 }
-
-// func (c *Conn) removeInFlight(requestID [16]byte) {
-// 	c.inflight.Delete(string(requestID[:]))
-// }
